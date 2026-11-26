@@ -6,14 +6,17 @@ import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.SmartInitializingSingleton;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.core.MethodParameter;
+import org.springframework.web.accept.ContentNegotiationManager;
 import org.springframework.web.context.request.ServletWebRequest;
 import org.springframework.web.method.HandlerMethod;
+import org.springframework.web.method.ControllerAdviceBean;
 import org.springframework.web.method.support.HandlerMethodReturnValueHandler;
 import org.springframework.web.servlet.ModelAndView;
 import org.springframework.web.servlet.mvc.method.annotation.ExceptionHandlerExceptionResolver;
 import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerAdapter;
 import org.springframework.web.servlet.mvc.method.annotation.RequestResponseBodyMethodProcessor;
 import org.springframework.web.servlet.mvc.method.annotation.ServletInvocableHandlerMethod;
+import org.springframework.web.servlet.mvc.method.annotation.ResponseBodyAdvice;
 
 import java.util.List;
 
@@ -27,9 +30,15 @@ public class ReleaseExceptionHandlerExceptionResolver extends ExceptionHandlerEx
 
     public static final String RELEASE_EXCEPTION_KEY = "RELEASE_EXCEPTION_KEY";
 
+    private boolean initialized;
+
     @Resource
     @Lazy
     private RequestMappingHandlerAdapter requestMappingHandlerAdapter;
+
+    @Resource(name = "mvcContentNegotiationManager")
+    @Lazy
+    private ContentNegotiationManager mvcContentNegotiationManager;
 
     @Override
     public void afterPropertiesSet() {
@@ -39,8 +48,16 @@ public class ReleaseExceptionHandlerExceptionResolver extends ExceptionHandlerEx
 
     @Override
     public void afterSingletonsInstantiated() {
-        setMessageConverters(requestMappingHandlerAdapter.getMessageConverters());
-        super.afterPropertiesSet();
+        initializeIfNecessary();
+    }
+
+    private synchronized void initializeIfNecessary() {
+        if (!initialized) {
+            setMessageConverters(requestMappingHandlerAdapter.getMessageConverters());
+            setContentNegotiationManager(mvcContentNegotiationManager);
+            super.afterPropertiesSet();
+            initialized = true;
+        }
     }
 
     @Override
@@ -48,7 +65,13 @@ public class ReleaseExceptionHandlerExceptionResolver extends ExceptionHandlerEx
         List<HandlerMethodReturnValueHandler> handlers = super.getDefaultReturnValueHandlers();
         // Keep the original release contract: plain objects from @ControllerAdvice are JSON
         // responses too. Standard MVC handlers retain priority for ResponseEntity, views, etc.
-        handlers.add(handlers.size() - 1, new RequestResponseBodyMethodProcessor(getMessageConverters()) {
+        List<Object> adviceBeans = ControllerAdviceBean.findAnnotatedBeans(getApplicationContext()).stream()
+                .filter(advice -> advice.getBeanType() != null
+                        && ResponseBodyAdvice.class.isAssignableFrom(advice.getBeanType()))
+                .map(advice -> (Object) advice)
+                .toList();
+        handlers.add(handlers.size() - 1, new RequestResponseBodyMethodProcessor(
+                getMessageConverters(), getContentNegotiationManager(), adviceBeans) {
             @Override
             public boolean supportsReturnType(MethodParameter returnType) {
                 return true;
@@ -60,6 +83,7 @@ public class ReleaseExceptionHandlerExceptionResolver extends ExceptionHandlerEx
     @Override
     public ModelAndView doResolveHandlerMethodException(HttpServletRequest request,
             HttpServletResponse response, HandlerMethod handlerMethod, Exception exception) {
+        initializeIfNecessary();
         return super.doResolveHandlerMethodException(request, response, handlerMethod, exception);
     }
 
