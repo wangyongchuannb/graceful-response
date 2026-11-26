@@ -9,6 +9,8 @@ import com.feiniaojin.gracefulresponse.api.ValidationStatusCode;
 import com.feiniaojin.gracefulresponse.data.Response;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.NotNull;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.SpringBootConfiguration;
@@ -93,6 +95,20 @@ class Boot4CompatibilityTest {
                 .andExpect(status().isUnprocessableEntity())
                 .andExpect(jsonPath("$.code").value("FIELD"));
     }
+    @Test void handlesMethodParameterValidation() throws Exception {
+        mvc.perform(get("/boot4/method-validation").param("count", "0"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.code").value("VALIDATION"))
+                .andExpect(jsonPath("$.msg").value("count must be positive"));
+    }
+    @Test void honorsMethodValidationAnnotation() throws Exception {
+        mvc.perform(get("/boot4/method-validation-annotation").param("count", "0"))
+                .andExpect(status().isUnprocessableEntity()).andExpect(jsonPath("$.code").value("METHOD"));
+    }
+    @Test void treatsInvalidReturnValueAsServerError() throws Exception {
+        mvc.perform(get("/boot4/invalid-return"))
+                .andExpect(status().isInternalServerError()).andExpect(jsonPath("$.code").value("1"))
+                .andExpect(jsonPath("$.msg").value("error"));
+    }
     @SpringBootConfiguration
     @EnableAutoConfiguration
     @EnableGracefulResponse
@@ -120,6 +136,13 @@ class Boot4CompatibilityTest {
         @PostMapping("/validate") Object validate(@Valid @RequestBody Input input) { return input; }
         @ValidationStatusCode(code = "FIELD", httpStatusCode = 422)
         @PostMapping("/validate-annotation") Object validateAnnotation(@Valid @RequestBody Input input) { return input; }
+        @GetMapping("/method-validation") Object methodValidation(
+                @RequestParam @Min(value = 1, message = "count must be positive") int count) { return count; }
+        @ValidationStatusCode(code = "METHOD", httpStatusCode = 422)
+        @GetMapping("/method-validation-annotation") Object methodValidationAnnotation(
+                @RequestParam @Min(value = 1, message = "count must be positive") int count) { return count; }
+        @NotNull(message = "private server contract")
+        @GetMapping("/invalid-return") Object invalidReturn() { return null; }
     }
     public record Input(@NotBlank(message = "name required") String name) { }
 }

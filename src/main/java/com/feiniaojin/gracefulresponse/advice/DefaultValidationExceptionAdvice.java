@@ -19,12 +19,14 @@ import jakarta.validation.ValidationException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.support.DefaultMessageSourceResolvable;
+import org.springframework.context.MessageSourceResolvable;
 import org.springframework.core.annotation.AnnotatedElementUtils;
 import org.springframework.core.annotation.Order;
 import org.springframework.expression.Expression;
 import org.springframework.expression.ExpressionParser;
 import org.springframework.expression.spel.standard.SpelExpressionParser;
 import org.springframework.http.HttpStatusCode;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.lang.Nullable;
 import org.springframework.util.StringUtils;
@@ -39,6 +41,7 @@ import org.springframework.web.context.request.RequestAttributes;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 import org.springframework.web.method.HandlerMethod;
+import org.springframework.web.method.annotation.HandlerMethodValidationException;
 import org.springframework.web.servlet.HandlerExecutionChain;
 import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping;
 
@@ -87,6 +90,11 @@ public class DefaultValidationExceptionAdvice extends AbstractControllerAdvice
             responseStatus = this.handleBindException(exception);
         } else if (ex instanceof ConstraintViolationException exception) {
             responseStatus = this.handleConstraintViolationException(exception);
+        } else if (ex instanceof HandlerMethodValidationException exception) {
+            if (exception.isForReturnValue()) {
+                return responseFactory.newFailInstance();
+            }
+            responseStatus = this.handleMethodValidationException(exception);
         }
         Response grRresponse;
         if (Objects.nonNull(responseStatus)) {
@@ -100,9 +108,31 @@ public class DefaultValidationExceptionAdvice extends AbstractControllerAdvice
     @Override
     @ExceptionHandler(value = {BindException.class,
             ValidationException.class,
-            MethodArgumentNotValidException.class})
+            MethodArgumentNotValidException.class,
+            HandlerMethodValidationException.class})
     public Object exceptionHandler(Exception exception) {
         return super.exceptionHandler(exception);
+    }
+
+    private ResponseStatus handleMethodValidationException(HandlerMethodValidationException exception) {
+        String msg = exception.getAllErrors().stream()
+                .map(MessageSourceResolvable::getDefaultMessage)
+                .filter(Objects::nonNull)
+                .collect(Collectors.joining(";"));
+        ValidationStatusCode validationStatusCode = this.findValidationStatusCodeInController();
+        String code = null;
+        if (validationStatusCode != null) {
+            RequestContextHolder.currentRequestAttributes().setAttribute(VALIDATION_STATUS_CODE,
+                    validationStatusCode, RequestAttributes.SCOPE_REQUEST);
+            code = validationStatusCode.code();
+        }
+        if (!StringUtils.hasLength(code)) {
+            code = properties.getDefaultValidateErrorCode();
+        }
+        if (!StringUtils.hasLength(code)) {
+            code = properties.getDefaultErrorCode();
+        }
+        return responseStatusFactory.newInstance(code, msg);
     }
 
     /**
@@ -323,6 +353,9 @@ public class DefaultValidationExceptionAdvice extends AbstractControllerAdvice
 
     @Override
     public ResponseEntity<Response> process(Response response, Throwable throwable) {
+        if (throwable instanceof HandlerMethodValidationException exception && exception.isForReturnValue()) {
+            return new ResponseEntity<>(response, HttpStatus.INTERNAL_SERVER_ERROR);
+        }
         //HTTP ResponseStatus的处理
         ValidationStatusCode validateStatusCode = (ValidationStatusCode) RequestContextHolder.currentRequestAttributes()
                 .getAttribute(VALIDATION_STATUS_CODE, RequestAttributes.SCOPE_REQUEST);
