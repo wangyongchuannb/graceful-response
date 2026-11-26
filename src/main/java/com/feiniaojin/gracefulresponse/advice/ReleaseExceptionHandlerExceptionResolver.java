@@ -8,7 +8,7 @@ import org.springframework.context.ApplicationContext;
 import org.springframework.context.ApplicationContextAware;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.converter.HttpMessageConverter;
-import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter;
+import org.springframework.http.converter.json.JacksonJsonHttpMessageConverter;
 import org.springframework.lang.Nullable;
 import org.springframework.ui.ModelMap;
 import org.springframework.web.accept.ContentNegotiationManager;
@@ -130,7 +130,7 @@ public class ReleaseExceptionHandlerExceptionResolver extends ExceptionHandlerEx
         if (!this.messageConverters.isEmpty()) {
             return;
         }
-        this.messageConverters.add(new MappingJackson2HttpMessageConverter());
+        this.messageConverters.add(new JacksonJsonHttpMessageConverter());
     }
 
     @Override
